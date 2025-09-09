@@ -1,9 +1,11 @@
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain
 from langchain_google_genai import ChatGoogleGenerativeAI
+from dotenv import load_dotenv
 
 import os
-os.environ["GOOGLE_API_KEY"] = "AIzaSyCFXcbFJizabZ1Nv9r0asXjRfeh1nHt19Y"
+load_dotenv()
+api_key = os.getenv("GOOGLE_API_KEY")
 class ConversationalAgent:
     """
     Conversational agent that can answer questions about ingested datasets.
@@ -48,3 +50,4 @@ class ConversationalAgent:
         chain = self.get_chain(dataset_name)
         response = chain({"question": query})
         return response["answer"]
+
