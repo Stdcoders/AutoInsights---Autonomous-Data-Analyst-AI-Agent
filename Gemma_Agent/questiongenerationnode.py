@@ -520,8 +520,23 @@ def format_data_understanding(understanding: dict) -> str:
 
     if column_roles:
         lines.append("📊 **Column Analysis:**")
-        for col, role in column_roles.items():
-            lines.append(f"   • **{col}**: {role}")
+        
+        # FIX: Handle both list and dictionary formats
+        if isinstance(column_roles, dict):
+            # Dictionary format: {"age": "Numeric age", "name": "Full name"}
+            for col, role in column_roles.items():
+                lines.append(f"   • **{col}**: {role}")
+        elif isinstance(column_roles, list):
+            # List format: [{"column": "age", "role": "Numeric age"}, ...] or just ["age: Numeric age", ...]
+            for item in column_roles:
+                if isinstance(item, dict):
+                    # Handle dict items: {"column": "age", "role": "Numeric age"}
+                    col = item.get("column", "Unknown")
+                    role = item.get("role", "Unknown")
+                    lines.append(f"   • **{col}**: {role}")
+                else:
+                    # Handle string items: "age: Numeric age"
+                    lines.append(f"   • {item}")
         lines.append("")
 
     if use_cases:
@@ -549,7 +564,7 @@ def format_data_understanding(understanding: dict) -> str:
 
     return "\n".join(lines)
 
-def data_understanding_node(state: ReportState, model: str = "google/gemma-7b-it") -> ReportState:
+def data_understanding_node(state: ReportState, model: str = "google/flan-t5-base") -> ReportState:
     """Uses LLM to semantically understand the dataset domain and context using CLEANED data."""
     # Check for cleaned tables first
     if "cleaned_tables" not in state:
@@ -639,7 +654,7 @@ def data_understanding_node(state: ReportState, model: str = "google/gemma-7b-it
     return state
 
 class QuestionGenerationAgent:
-    def __init__(self, model: str = "google/gemma-7b-it"):
+    def __init__(self, model: str = "google/flan-t5-base"):
         self.llm = GemmaLLM(model_name=model)
 
     @staticmethod
@@ -694,50 +709,35 @@ class QuestionGenerationAgent:
         return [f"What are the trends and patterns in {col}?" for col in cols[:num_questions]]
 
 def data_question_generation_node(state: ReportState, num_questions: int = 10) -> ReportState:
-    """
-    Node to generate analytical questions using CLEANED dataset profile + understanding.
-    """
-    # Check dependencies
-    if "cleaned_tables" not in state:
-        raise ValueError("No cleaned data found. Run data_cleaning_analysis_node first.")
-    
-    if "data_understanding" not in state:
-        raise ValueError("No data understanding found. Run data_understanding_node first.")
-    
-    if "data_profiles" not in state:
-        raise ValueError("No enhanced profiles found. Run data_understanding_node first.")
+    """Generate analytical/statistical questions for dataset exploration."""
 
-    agent = QuestionGenerationAgent()
-    state["generated_questions"] = {}
-    state["question_generation_metadata"] = {}
+    llm = GemmaLLM(model_name="google/flan-t5-base")
 
-    for dataset_name in state["cleaned_tables"].keys():
-        print(f"\n❓ Generating questions for cleaned dataset: {dataset_name}")
-        
-        enhanced_profile = state["data_profiles"][dataset_name]
-        understanding = state["data_understanding"].get(dataset_name, {})
-        
-        # Verify we have clean data
-        df = state["cleaned_tables"][dataset_name]
-        print(f"   Clean data shape: {df.shape}")
-        print(f"   Available columns: {list(df.columns)}")
+    questions_by_dataset = {}
+    for dataset_name, df in state["processed_tables"].items():
+        cols = list(df.columns)
+        sample_data = df.head(3).to_dict(orient="records")
 
-        questions = agent.generate(enhanced_profile, understanding, num_questions)
-        state["generated_questions"][dataset_name] = questions
-        
-        # Store metadata about the generation
-        state["question_generation_metadata"][dataset_name] = {
-            "source": "cleaned_data",
-            "num_questions": len(questions),
-            "dataset_shape": df.shape,
-            "cleaning_impact": enhanced_profile.get("cleaning_impact", {}),
-            "generation_timestamp": pd.Timestamp.now().isoformat()
-        }
+        prompt = f"""
+        You are a data analyst tasked with helping a user explore their dataset.
 
-        print(f"\n❓ Generated {len(questions)} Questions for '{dataset_name}':")
-        print("-" * 50)
-        for i, q in enumerate(questions, 1):
-            print(f"{i:2d}. {q}")
-        print("-" * 50)
+        Dataset name: {dataset_name}
+        Columns: {cols}
+        Sample data (first 3 rows): {sample_data}
 
+        Generate {num_questions} diverse and high-quality questions that a user might ask.
+        The questions should:
+        - Go beyond basic "what is the mean" type queries.
+        - Include analytical aspects (correlation, comparisons, group analysis, time trends).
+        - Include statistical checks (distribution, variance, outliers, regression).
+        - Provide useful insights for decision-making.
+
+        Return the questions as a simple numbered list.
+        """
+
+        response_text = llm._call(prompt)
+        questions = [q.strip("0123456789. ") for q in response_text.split("\n") if q.strip()]
+        questions_by_dataset[dataset_name] = questions[:num_questions]
+
+    state["generated_questions"] = questions_by_dataset
     return state
