@@ -1,52 +1,33 @@
-# ---------------- gemma_llm.py ----------------
 from langchain.llms.base import LLM
-from typing import Optional, List, Any, Mapping
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
-import torch
-# Add at the top of gemma_llm.py
-from huggingface_hub import login
-import os
-
-# Login to Hugging Face
-def hf_login():
-    token = os.getenv("HF_API_TOKEN")
-    if not token:
-        print("❌ HF_API_TOKEN not found in environment variables.")
-        print("Please set your Hugging Face token:")
-        print("1. Get your token from: https://huggingface.co/settings/tokens")
-        print("2. Set it as environment variable: export HF_API_TOKEN=your_token_here")
-        print("Or enter it manually when prompted.")
-        token = input("Enter your Hugging Face token: ")
-    login(token=token)
+from typing import Optional, Any, Mapping, List
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModelForSeq2SeqLM, pipeline
 
 class GemmaLLM(LLM):
-    """
-    A custom LLM class for Gemma models using Hugging Face Transformers.
-    """
-    model_name: str = "google/gemma-2b-it"  # or "google/gemma-2b-it"
-    pipeline: Any = None
+    model_name: str = "google/flan-t5-base"  # Pydantic field
+    hf_pipeline: Optional[Any] = None        # store Hugging Face pipeline
 
-    def __init__(self, model_name: Optional[str] = None, **kwargs):
-        super().__init__(**kwargs)
-        if model_name:
-            self.model_name = model_name
-    
-    # Add login before loading the model
-        hf_login()
-    
-        print(f"Loading Gemma model: {self.model_name}...")
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)  # crucial: call LLM's init
+
+        # Initialize Hugging Face tokenizer and model
         tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        model = AutoModelForCausalLM.from_pretrained(
-        self.model_name,
-        device_map="auto",
-        torch_dtype=torch.float16,
-    )
-        # Create a text generation pipeline
-        self.pipeline = pipeline(
-            "text-generation",
+        if "gemma" in self.model_name.lower():
+            model = AutoModelForCausalLM.from_pretrained(
+                self.model_name,
+                device_map="auto",
+                torch_dtype="auto",
+                offload_folder="offload_dir"
+            )
+            task = "text-generation"
+        else:
+            model = AutoModelForSeq2SeqLM.from_pretrained(self.model_name)
+            task = "text2text-generation"
+
+        self.hf_pipeline = pipeline(
+            task,
             model=model,
             tokenizer=tokenizer,
-            device_map="auto",
+            device_map="auto" if "gemma" in self.model_name.lower() else -1
         )
 
     @property
@@ -54,21 +35,16 @@ class GemmaLLM(LLM):
         return "gemma"
 
     def _call(self, prompt: str, stop: Optional[List[str]] = None) -> str:
-        # Generate text using the pipeline
-        messages = [
-            {"role": "user", "content": prompt}
-        ]
-        prompt_formatted = self.pipeline.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        outputs = self.pipeline(
-            prompt_formatted,
+        outputs = self.hf_pipeline(
+            prompt,
             max_new_tokens=512,
             do_sample=True,
             temperature=0.7,
             top_k=50,
             top_p=0.95,
-            return_full_text=False  # Do not include the input prompt in the output
+            #return_full_text=False
         )
-        return outputs[0]['generated_text']
+        return outputs[0]["generated_text"]
 
     @property
     def _identifying_params(self) -> Mapping[str, Any]:
