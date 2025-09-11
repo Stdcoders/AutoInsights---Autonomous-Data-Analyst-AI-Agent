@@ -1,4 +1,5 @@
-# ---------------- workflow.py ----------------
+
+# workflow.py
 import os
 from typing import TypedDict
 from state import ReportState
@@ -8,9 +9,10 @@ from questiongenerationnode import (
     data_understanding_node,
     data_question_generation_node
 )
-from conversationalagent import ConversationalAgent
 from visualizationinsightsnode import InsightAgent
 from langgraph.graph import StateGraph
+from hypothesisnode import HypothesisTesterLLM
+
 
 # ---------------- Workflow State Schema ----------------
 class WorkflowState(TypedDict):
@@ -29,7 +31,39 @@ def ingestion_wrapper(workflow_state: WorkflowState):
         workflow_state["file_type"],
     )
     return {"state": new_state}
+def hypothesis_testing_wrapper(workflow_state: WorkflowState):
+    state = workflow_state["state"]
+    dataset_name = workflow_state["dataset_name"]
 
+    if "processed_tables" not in state or dataset_name not in state["processed_tables"]:
+        return {"state": state}
+
+    df = state["processed_tables"][dataset_name]
+    tester = HypothesisTesterLLM()
+
+    # Step 1: Generate hypotheses
+    hyps = tester.generate_hypotheses(df)
+
+    # Step 2: Test each hypothesis
+    results = []
+    for h in hyps:
+        res = tester.test_hypothesis(df, h)
+        results.append(res)
+
+    # Rank results by score
+    ranked = sorted(results, key=lambda x: x.get("score", 0), reverse=True)
+
+    # Store in state
+    state_insights = state.get("insights", {})
+    if not isinstance(state_insights, dict):
+        state_insights = {}
+    state_insights[dataset_name] = {
+        "hypotheses": hyps,
+        "tested_insights": ranked,
+    }
+    state["insights"] = state_insights
+
+    return {"state": state}
 
 def analysis_wrapper(workflow_state: WorkflowState):
     new_state = data_cleaning_analysis_node(workflow_state["state"])
@@ -42,23 +76,85 @@ def understanding_wrapper(workflow_state: WorkflowState):
 
 
 def question_generation_wrapper(workflow_state: WorkflowState):
-    new_state = data_question_generation_node(workflow_state["state"], num_questions=10)
+    new_state = data_question_generation_node(workflow_state["state"], num_questions=20)
     return {"state": new_state}
 
-def insight_wrapper(workflow_state: WorkflowState):
+
+def exploration_loop_wrapper(workflow_state: WorkflowState):
+    """
+    Run autonomous exploration over generated questions/hypotheses.
+    For each question, call the InsightAgent, collect answers and scores.
+    Store a ranked list of insights in state.
+    """
     state = workflow_state["state"]
     dataset_name = workflow_state["dataset_name"]
-    selected_question = workflow_state.get("selected_question")
 
-    if not selected_question:
-        raise ValueError("❌ No question selected for insight generation.")
+    if "processed_tables" not in state or dataset_name not in state["processed_tables"]:
+        return {"state": state}
 
     df = state["processed_tables"][dataset_name]
-    agent = InsightAgent()
-    result = agent.answer(df, selected_question)
 
-    state["insights"] = {dataset_name: result}
+    # Obtain candidate questions (from previous node) or generate fallback set
+    gen_q = state.get("generated_questions", {}) or {}
+    candidates = gen_q.get(dataset_name, []) if isinstance(gen_q, dict) else []
+
+    # If still empty, provide a few heuristic hypotheses
+    if not candidates:
+        candidates = [
+            "Provide a high-level overview of this dataset.",
+            "Which numeric features correlate most strongly with each other?",
+            "Are there any strong trends over time in the dataset?",
+            "Which categorical groups differ most on the target variable?",
+            "Detect top anomalies or outliers in the data."
+        ]
+
+    agent = InsightAgent()
+    all_results = []
+
+    for q in candidates:
+        try:
+            res = agent.answer(df, q)
+            # Score the result heuristically (InsightAgent provides scoring helper)
+            score = getattr(agent, "score_insight", None)
+            if callable(score):
+                s = score(df, res, q)
+            else:
+                # default simple scoring: prefer answers that include correlations or numeric summaries
+                s = 0
+                if isinstance(res, dict):
+                    text = (res.get("answer") or "")
+                    if "correl" in text.lower():
+                        s += 2
+                    if "trend" in text.lower() or "r^2" in text.lower() or "r2" in text.lower():
+                        s += 1.5
+                    if res.get("visualization_html"):
+                        s += 0.5
+            all_results.append({"question": q, "answer": res.get("answer"), "viz_html": res.get("visualization_html"), "score": s})
+        except Exception as e:
+            all_results.append({"question": q, "answer": f"Error running analysis: {e}", "viz_html": None, "score": 0})
+
+    # Rank insights
+    ranked = sorted(all_results, key=lambda x: x.get("score", 0), reverse=True)
+
+    # Keep top-N (configurable)
+    top_n = ranked[:6]
+
+    # Produce a short summary (could call an LLM - but keep fallback deterministic)
+    summary_lines = [f"Top {len(top_n)} insights:"]
+    for i, item in enumerate(top_n, 1):
+        summary_lines.append(f"{i}. {item['question']} (score: {item.get('score',0)})")
+
+    summary_report = "\n".join(summary_lines)
+
+    # Store in state
+    state_insights = state.get("insights", {})
+    if not isinstance(state_insights, dict):
+        state_insights = {}
+    state_insights[dataset_name] = {"ranked_insights": top_n, "summary_report": summary_report}
+    state["insights"] = state_insights
+
     return {"state": state}
+
 
 # ---------------- Graph Definition ----------------
 def create_graph():
@@ -68,17 +164,20 @@ def create_graph():
     graph.add_node("DataCleaningAndAnalysis", analysis_wrapper)
     graph.add_node("DataUnderstanding", understanding_wrapper)
     graph.add_node("QuestionGeneration", question_generation_wrapper)
-
-    # ✅ REMOVE DataInsight from the graph
-    # graph.add_node("DataInsight", insight_wrapper)
+    graph.add_node("ExplorationLoop", exploration_loop_wrapper)
+    graph.add_node("HypothesisTesting", hypothesis_testing_wrapper)  # ✅ add this
 
     graph.add_edge("DataIngestion", "DataCleaningAndAnalysis")
     graph.add_edge("DataCleaningAndAnalysis", "DataUnderstanding")
     graph.add_edge("DataUnderstanding", "QuestionGeneration")
+    graph.add_edge("QuestionGeneration", "ExplorationLoop")
+    graph.add_edge("QuestionGeneration", "HypothesisTesting")         # ✅ link here
+    graph.add_edge("HypothesisTesting", "ExplorationLoop")
 
     graph.set_entry_point("DataIngestion")
 
     return graph.compile()
+
 
 # ---------------- Auto-detect File Type ----------------
 def detect_file_type(file_path: str) -> str:
@@ -98,117 +197,16 @@ def detect_file_type(file_path: str) -> str:
     }
     return mapping.get(ext, "")
 
-# ---------------- Main ----------------
-def main():
-    dataset_name = input("Enter a name for your dataset: ").strip()
-    file_path = input("Enter the full path of the dataset file: ").strip()
-
-    file_type = detect_file_type(file_path)
-    if not file_type:
-        print("❌ Could not detect file type from extension.")
-        print("Please ensure the file has a supported extension (csv, xlsx, json, txt, pdf, image formats).")
-        return
-
-    print(f"✅ Detected file type: {file_type}")
-
-    state = ReportState()
-    graph = create_graph()
-
-    inputs = {
-        "state": state,
-        "dataset_name": dataset_name,
-        "file_path": file_path,
-        "file_type": file_type,
-        "selected_question": ""
-    }
-    result = graph.invoke(inputs)
-
-    print("\n✅ Workflow completed up to question generation!")
-    print("Available datasets:", list(result["state"]["processed_tables"].keys()))
-
-    questions = result["state"].get("generated_questions", {}).get(dataset_name, [])
-    print("\n❓ Suggested Questions:")
-    for i, q in enumerate(questions, 1):
-        print(f"{i}. {q}")
-
-    if not questions:
-        print("⚠️ No questions generated. You can still ask your own.\n")
-
-    ingestor = result["state"]["file_ingestor"]
-    #conv_agent = ConversationalAgent(ingestor)
-    conv_agent = ConversationalAgent(result["state"])
-    insight_agent = InsightAgent(model="gemini-2.5-flash")
-
-    # Update the chat loop in workflow.py main() function
-    print("\n💬 Chat mode started! Ask questions about your dataset.")
-    print("👉 You can either:")
-    print("   - Type a free question")
-    print("   - Enter the number of a suggested question")
-    print("   - Type 'history' or 'show history' to see previous messages")
-    print("   - Type 'visualization' or 'viz' to see the last visualization")
-    print("   - Type 'exit' to quit\n")
-
-    last_visualization = None
-
-    while True:
-        user_q = input("You: ").strip()
-        if user_q.lower() in {"exit", "quit"}:
-            print("👋 Ending chat.")
-            break
-
-        # Replace the history section in the chat loop with:
-        if user_q.lower() in {"history", "show history", "chat history"}:
-            history_text = conv_agent.get_chat_history_formatted()
-            print(f"\n📜 Chat History:\n{history_text}\n")
-            continue
-
-        if user_q.lower() in {"visualization", "viz"}:
-            if last_visualization:
-                print("\n📊 Last Visualization:")
-                print("(HTML content available for rendering in frontend)")
-                print(f"Visualization type generated for your last question")
-            else:
-                print("⚠️ No visualization generated yet. Ask a question first.")
-            continue
-
-        if user_q.isdigit():
-            q_idx = int(user_q) - 1
-            if 0 <= q_idx < len(questions):
-                user_q = questions[q_idx]
-                print(f"👉 Using suggested question: {user_q}")
-            else:
-                print("⚠️ Invalid number. Please choose a valid question index.")
-                continue
-
-        try:
-            # Get answer from conversational agent (vector store)
-            vector_answer = conv_agent.ask(dataset_name, user_q)
-            
-            # Get insights and visualization from InsightAgent
-            df = ingestor.get_dataset(dataset_name)
-            insight_result = insight_agent.answer(df, user_q)
-            insight_answer = insight_result.get("answer", "")
-            viz_html = insight_result.get("visualization_html")
-            
-            # Store the last visualization
-            last_visualization = viz_html
-            
-            # Combine both answers for a comprehensive response
-            print(f"\n🤖 Agent Response:")
-            print(f"📚 From dataset context: {vector_answer}")
-            
-            if insight_answer and insight_answer != vector_answer:
-                print(f"📊 Data insights: {insight_answer}")
-            
-            if viz_html:
-                print("📈 Visualization generated! Type 'viz' to see details or render the HTML in your application.")
-            else:
-                print("ℹ️  No visualization was generated for this question.")
-            
-            print()
-
-        except Exception as e:
-            print(f"⚠️ Error: {e}")
 
 if __name__ == "__main__":
-    main()
+    pass
+
+
+## visualizationinsightsnode.py
+# visualizationinsightsnode.py
+
+
+
+## app.py
+
+# app.py
