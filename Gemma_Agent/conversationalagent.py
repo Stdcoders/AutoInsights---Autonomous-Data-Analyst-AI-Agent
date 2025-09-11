@@ -349,7 +349,7 @@ class EnhancedConversationalAgent:
             return f"I can help with analysis, profiling, insights, or visualizations. Try asking about specific aspects of your data."'''
 
 # ---------------- conversationalagent.py ----------------
-from langchain.memory import ConversationBufferMemory
+'''from langchain.memory import ConversationBufferMemory
 from langchain.schema import HumanMessage, AIMessage
 from gemma_llm import GemmaLLM
 import pandas as pd
@@ -361,7 +361,9 @@ class ConversationalAgent:
     Enhanced conversational agent that leverages ALL preprocessing work.
     Provides fast, accurate answers using precomputed results only.
     """
-
+    def clear_memory(self):
+        """Clear conversation memory"""
+        self.memory.clear()
     def get_chat_history_formatted(self) -> str:
         """Return chat history in a user-friendly formatted string"""
         history = self.memory.load_memory_variables({}).get("chat_history", [])
@@ -383,12 +385,17 @@ class ConversationalAgent:
             return_messages=True,
             max_history_limit=max_history
         )
-
+    def _has_required_preprocessing(self, dataset_name: str) -> bool:
+        """Check if all required preprocessing steps are completed for this dataset"""
+        required_keys = ['cleaned_tables', 'analysis_results', 'data_understanding', 'generated_questions']
+        return all(key in self.state and dataset_name in self.state[key] for key in required_keys)
     def ask(self, dataset_name: str, query: str) -> str:
         """
         Smart router that uses precomputed results with absolute certainty.
         NO reprocessing - only accesses existing preprocessing results.
         """
+        if not self._has_required_preprocessing(dataset_name):
+            return "❌ Please run the complete preprocessing pipeline first (cleaning -> analysis -> understanding -> question generation)."
         # Add to conversation history
         self.memory.chat_memory.add_user_message(query)
         
@@ -583,4 +590,101 @@ class ConversationalAgent:
 
     def clear_memory(self):
         """Clear conversation history"""
+        self.memory.clear()'''
+
+from langchain.agents import initialize_agent, Tool
+from langchain.memory import ConversationBufferMemory
+from gemma_llm import GemmaLLM  # your wrapper around Gemma model
+from visualizationinsightsnode import InsightAgent
+from dataanalysisnode import data_cleaning_analysis_node
+
+
+class ConversationalAgent:
+    """
+    Conversational AI Agent for dataset analysis.
+    Uses tools (querying, analysis, visualization) to respond to user queries
+    instead of just acting like a chatbot.
+    """
+
+    def __init__(self, state, model_name=None):
+        self.state = state
+        '''self.llm = GemmaLLM(model_name=model_name)
+        self.insight_agent = InsightAgent(model=model_name)'''
+
+        # Default to Gemma for multi-step reasoning
+        model_name = model_name or "google/flan-t5-base"
+        self.llm = GemmaLLM(model_name=model_name)
+
+        # Memory: keeps conversation context across turns
+        self.memory = ConversationBufferMemory(
+            memory_key="chat_history",
+            return_messages=True
+        )
+
+        # ---------------- TOOLS ----------------
+        self.tools = [
+            Tool(
+                name="QueryData",
+                func=self.query_data,
+                description="Use this to answer user questions by checking dataset content."
+            ),
+            Tool(
+                name="AnalyzeData",
+                func=self.analyze_data,
+                description="Use this to run statistical/cleaning analysis on the dataset."
+            ),
+            Tool(
+                name="GenerateVisualization",
+                func=self.generate_visualization,
+                description="Use this to create visualizations (scatter, histogram, heatmap, etc.)."
+            ),
+        ]
+
+        # ---------------- AGENT ----------------
+        self.agent = initialize_agent(
+            tools=self.tools,
+            llm=self.llm,
+            agent="conversational-react-description",
+            memory=self.memory,
+            verbose=True,
+            handle_parsing_errors=True,
+        )
+
+    # --------- TOOL IMPLEMENTATIONS ---------
+    def query_data(self, query: str) -> str:
+        """Query dataset metadata/content."""
+        if "file_ingestor" not in self.state:
+            return "No dataset ingested yet."
+        ingestor = self.state["file_ingestor"]
+        ds_name = list(ingestor.datasets.keys())[0]
+        df = ingestor.get_dataset(ds_name)
+
+        # Simple strategy: return column names and row count
+        return f"Dataset '{ds_name}' has {len(df)} rows and {len(df.columns)} columns. Columns: {list(df.columns)}"
+
+    def analyze_data(self, query: str) -> str:
+        """Run cleaning + statistical analysis on the dataset."""
+        new_state = data_cleaning_analysis_node(self.state)
+        self.state.update(new_state.to_dict())
+        return "Data cleaned and statistical analysis performed. Results stored in state."
+
+    def generate_visualization(self, query: str) -> str:
+        """Generate a visualization using InsightAgent."""
+        if "file_ingestor" not in self.state:
+            return "No dataset ingested yet."
+        ingestor = self.state["file_ingestor"]
+        ds_name = list(ingestor.datasets.keys())[0]
+        df = ingestor.get_dataset(ds_name)
+
+        result = self.insight_agent.answer(df, query)
+        self.state["last_viz"] = result.get("visualization_html")
+        return result.get("answer", "Generated visualization.")
+
+    # --------- AGENT INTERFACE ---------
+    def ask(self, dataset_name: str, query: str) -> str:
+        """Ask the agent a question. The agent decides which tools to use."""
+        return self.agent.run(query)
+
+    def clear_memory(self):
+        """Reset conversation memory."""
         self.memory.clear()
