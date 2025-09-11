@@ -16,7 +16,9 @@ from langchain_community.document_loaders import (
     TextLoader, UnstructuredPDFLoader, UnstructuredImageLoader
 )
 from langchain_community.document_loaders import PyPDFLoader
-
+from dotenv import load_dotenv
+load_dotenv()
+HF_TOKEN = os.getenv("HF_TOKEN")
 
 # ================== FILE INGESTOR ==================
 class FileIngestor:
@@ -27,7 +29,8 @@ class FileIngestor:
         self.chunk_overlap = chunk_overlap
 
         self.embedding_model = embedding_model or HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2"
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_kwargs={"token": HF_TOKEN} if HF_TOKEN else {}
         )
 
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -261,18 +264,24 @@ def data_ingestion_node(
     csv_args: Optional[dict] = None, sheet_name: Optional[str] = None
 ) -> ReportState:
     """This node ingests data into the pipeline and updates the ReportState."""
-
+    
+    # Handle Gradio file objects
+    if hasattr(file_path, 'name'):  # Gradio file object
+        actual_file_path = file_path.name
+    else:
+        actual_file_path = file_path
+    
     if "file_ingestor" not in state:
         state["file_ingestor"] = FileIngestor()
 
     ingestor = state["file_ingestor"]
 
     if file_type == "csv":
-        df = ingestor.from_csv(dataset_name, file_path, csv_args)
+        df = ingestor.from_csv(dataset_name, actual_file_path, csv_args)
     elif file_type == "excel":
-        df = ingestor.from_excel(dataset_name, file_path, sheet_name)
+        df = ingestor.from_excel(dataset_name, actual_file_path, sheet_name)
     elif file_type == "json":
-        df = ingestor.from_json(dataset_name, file_path)
+        df = ingestor.from_json(dataset_name, actual_file_path)
     '''elif file_type == "text":
         df = ingestor.from_text(dataset_name, file_path)
     elif file_type == "pdf":
