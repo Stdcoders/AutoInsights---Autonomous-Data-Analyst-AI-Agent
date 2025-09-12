@@ -29,3 +29,6 @@ Vector Search & Storage: faiss-cpu
 Data Visualization: matplotlib, seaborn, plotly
 
 Utilities: python-dotenv, requests, regex, pillow
+
+
+Currently working on integrating memory in the conversational agent. 
