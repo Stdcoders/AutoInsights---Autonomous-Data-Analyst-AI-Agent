@@ -1,34 +1,54 @@
-AutoInsights is a powerful, autonomous AI agent designed to automate the entire data analysis and document processing workflow. From ingesting raw data in multiple formats (CSV, Excel, PDF, Word) to generating insightful visualizations and detailed reports, this agent leverages a robust local tech stack to act as your intelligent, private data scientist.
+# An autonomous, conversational data analyst agent that ingests structured and unstructured documents, processes them via NLP pipelines, builds vector embeddings, provides retrieval, generates visualizations, and produces reports. Runs wholly on local or private infrastructure for data privacy.
 
-✨ Features
-Multi-Format Data Ingestion: Seamlessly load and process structured and unstructured data from CSV, Excel, PDF, and Word documents using the unstructured library and ONNX runtime.
+# Features
 
-Advanced NLP Pipeline: Perform comprehensive text processing, including tokenization, named entity recognition (NER) with spaCy, language detection, and keyword extraction with NLTK.
+# Ingests data from multiple formats: CSV, Excel, PDF, Word, etc.
 
-Local & Private Stack: Run everything on your own machine. Uses local embeddings (sentence-transformers), a local vector store (FAISS), and avoids external API calls for core processing.
+# NLP preprocessing: tokenization, language detection, Named Entity Recognition, summarization, etc.
 
-Intelligent Insight Generation: Uses LangChain to structure reasoning and analysis, identifying key trends, patterns, and anomalies directly in your data.
+# Embedding generation + vector store search (local embeddings; FAISS)
 
-Automated Visualization: Create a variety of compelling visualizations (histograms, scatter plots, interactive charts) with Matplotlib, Seaborn, and Plotly.
+# Conversational interface (chat-based queries) over data and documents
 
-Detailed Reporting: Compiles all findings, statistics, and visualizations into a cohesive, well-structured report.
+# Visualization and report generation (charts, plots, dashboards)
 
-🛠️ Technology Stack
-This project is built with a powerful combination of open-source libraries:
+# Modular pipeline: loaders, transformers, processors, report modules
 
-Core Data Processing: pandas, numpy
+# Architecture & Project Layout
+.
+├── agent_worfklow_final.py        # Main entry point: orchestrates user chat, pipeline runs, ingestion → embedding → search/response → report
+├── gemma_llm.py                   # Wrapper module for LLM interactions (abstraction over prompt design, model loading, etc.)
+├── nodes/
+│   ├── loader_*.py                # Loaders for different file types (CSV, PDF, Word, Excel, etc.)
+│   ├── transformer_*.py           # Text extraction, normalization, cleaning
+│   ├── processor_*.py             # NLP tasks: summarization, NER, keyword extraction, etc.
+├── memory/                        # Vector store, embeddings, indexing, persistence
+├── reports/                       # Templates & output logic for reports / visualizations
+├── utils/                         # Utilities: file IO, plotting, logging, parsing helpers
+├── models/                        # Pretrained or ONNX models, if any
+├── config/ or .env / config.yaml  # Configuration variables, paths, model names, etc.
+└── tests/ (if present)            # Unit tests for modules
 
-Natural Language Processing (NLP): spacy, nltk, langdetect, wordcloud
+# Requirements & Dependencies
+Python ≥ 3.8
+pandas
+numpy
+spacy
+nltk
+langdetect
+sentence-transformers
+faiss-cpu
+langchain
+unstructured
+onnxruntime
+PyPDF2
+python-docx
+openpyxl
+matplotlib
+seaborn
+plotly
+python-dotenv
+pillow
 
-File Loading & Parsing: unstructured (with onnxruntime for inference), PyPDF2, python-docx, openpyxl
-
-AI & Embeddings Framework: langchain, sentence-transformers
-
-Vector Search & Storage: faiss-cpu
-
-Data Visualization: matplotlib, seaborn, plotly
-
-Utilities: python-dotenv, requests, regex, pillow
-
-
-Currently working on integrating memory in the conversational agent. 
+# Command for running the agentic system 
+python agent_workflow_final.py 
