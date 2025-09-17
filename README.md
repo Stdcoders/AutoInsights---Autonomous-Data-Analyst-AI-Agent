@@ -1,4 +1,5 @@
-# An autonomous, conversational data analyst agent that ingests structured and unstructured documents, processes them via NLP pipelines, builds vector embeddings, provides retrieval, generates visualizations, and produces reports. Runs wholly on local or private infrastructure for data privacy.
+# ContextAI - Chat Based Data Analyst AI Agent
+An autonomous, conversational data analyst agent that ingests structured and unstructured documents, processes them via NLP pipelines, builds vector embeddings, provides retrieval, generates visualizations, and produces reports. Runs wholly on local or private infrastructure for data privacy.
 
 # Features
 
