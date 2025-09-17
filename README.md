@@ -1,5 +1,6 @@
 # ContextAI - Chat Based Data Analyst AI Agent
-An autonomous, conversational data analyst agent that ingests structured and unstructured documents, processes them via NLP pipelines, builds vector embeddings, provides retrieval, generates visualizations, and produces reports. Runs wholly on local or private infrastructure for data privacy.
+Developed ContextAI, an autonomous conversational data analyst agent that processes multi-format documents (CSV, PDF, Excel, Word) through NLP pipelines and generates interactive visualizations and reports via chat-based queries.
+Built with Python using Hugging Face's Gemma-2-2b-it model, vector embeddings (FAISS), and transformer architecture, enabling intelligent document analysis and natural language interactions with data.
 
 # Features
 
