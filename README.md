@@ -2,19 +2,19 @@
 
 # Features
 
-# Ingests data from multiple formats: CSV, Excel, PDF, Word, etc.
+Ingests data from multiple formats: CSV, Excel, PDF, Word, etc.
 
-# NLP preprocessing: tokenization, language detection, Named Entity Recognition, summarization, etc.
+NLP preprocessing: tokenization, language detection, Named Entity Recognition, summarization, etc.
 
-# Embedding generation + vector store search (local embeddings; FAISS)
+Embedding generation + vector store search (local embeddings; FAISS)
 
-# Conversational interface (chat-based queries) over data and documents
+Conversational interface (chat-based queries) over data and documents
 
-# Visualization and report generation (charts, plots, dashboards)
+Visualization and report generation (charts, plots, dashboards)
 
-# Modular pipeline: loaders, transformers, processors, report modules
+Modular pipeline: loaders, transformers, processors, report modules
 
-# Architecture & Project Layout
+Architecture & Project Layout
 .
 ├── agent_worfklow_final.py        # Main entry point: orchestrates user chat, pipeline runs, ingestion → embedding → search/response → report
 ├── gemma_llm.py                   # Wrapper module for LLM interactions (abstraction over prompt design, model loading, etc.)
