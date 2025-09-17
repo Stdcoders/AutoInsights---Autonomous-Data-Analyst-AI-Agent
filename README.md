@@ -15,7 +15,7 @@ Visualization and report generation (charts, plots, dashboards)
 
 Modular pipeline: loaders, transformers, processors, report modules
 
-Architecture & Project Layout
+# Architecture & Project Layout
 .
 ├── agent_worfklow_final.py        # Main entry point: orchestrates user chat, pipeline runs, ingestion → embedding → search/response → report
 ├── gemma_llm.py                   # Wrapper module for LLM interactions (abstraction over prompt design, model loading, etc.)
